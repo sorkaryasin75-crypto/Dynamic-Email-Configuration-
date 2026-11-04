@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="bn" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gmail Dynamic Sync Manager - Telegram Mini App</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        gmail: {
+                            red: '#ea4335',
+                            blue: '#4285f4',
+                            green: '#34a853',
+                            yellow: '#fbbc05',
+                            bgDark: '#0f172a',
+                            cardDark: '#1e293b',
+                            borderDark: '#334155'
+                        }
+                    }
+                }
+            }
+        };
+    </script>
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Identity Services (GIS) SDK -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- Google API Client Library (gapi) -->
+    <script src="https://apis.google.com/js/api.js" async defer></script>
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <style>
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 h-screen flex flex-col overflow-hidden font-sans">
+
+    <!-- ========================================== -->
+    <!-- TOP NAVBAR / HEADER                        -->
+    <!-- ========================================== -->
+    <header class="bg-slate-900/90 border-b border-slate-800 px-4 py-3 flex items-center justify-between shadow-lg z-20 shrink-0">
+        <div class="flex items-center space-x-3">
+            <button id="btn-toggle-sidebar" class="p-2 rounded-xl hover:bg-slate-800 text-slate-300 focus:outline-none">
+                <i class="fa-solid fa-bars-staggered text-lg"></i>
+            </button>
+            <div class="flex items-center space-x-2">
+                <i class="fa-solid fa-envelope text-gmail-red text-2xl animate-pulse"></i>
+                <span class="font-bold text-lg text-white tracking-wide hidden sm:inline">Gmail Dynamic Mini App</span>
+            </div>
+        </div>
+
+        <!-- Dynamic View Tabs -->
+        <div class="flex items-center bg-slate-800 p-1 rounded-xl border border-slate-700 text-xs">
+            <button id="tab-inbox-btn" class="px-3 py-1.5 rounded-lg font-medium transition-all bg-gmail-blue text-white shadow">
+                <i class="fa-solid fa-inbox mr-1"></i> ইনবক্স
+            </button>
+            <button id="tab-login-btn" class="px-3 py-1.5 rounded-lg font-medium transition-all text-slate-400 hover:text-white">
+                <i class="fa-solid fa-key mr-1"></i> লগইন/সেটিংস
+            </button>
+        </div>
+
+        <!-- Right Quick Controls -->
+        <div class="flex items-center space-x-2">
+            <button id="btn-sync-now" title="Sync Inbox" class="p-2 rounded-xl hover:bg-slate-800 text-slate-300">
+                <i class="fa-solid fa-rotate" id="sync-icon"></i>
+            </button>
+            <div id="active-user-badge" class="relative cursor-pointer" onclick="switchView('login')">
+                <img id="active-user-img" src="https://placehold.co/100x100/ea4335/ffffff?text=G" alt="User" class="w-8 h-8 rounded-full border-2 border-gmail-blue object-cover">
+                <span id="account-badge-count" class="absolute -top-1 -right-1 bg-gmail-red text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">0</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- ========================================== -->
+    <!-- MAIN LAYOUT WRAPPER                        -->
+    <!-- ========================================== -->
+    <div class="flex flex-1 overflow-hidden relative">
+
+        <!-- SIDEBAR NAVIGATION -->
+        <aside id="app-sidebar" class="absolute md:relative z-30 w-64 h-full bg-slate-900 border-r border-slate-800 flex flex-col transition-transform duration-300 transform -translate-x-full md:translate-x-0">
+            <!-- Compose Button -->
+            <div class="p-4">
+                <button id="btn-compose-modal" class="w-full flex items-center justify-center space-x-2 bg-gradient-to-r from-gmail-blue to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white py-3 px-4 rounded-xl shadow-lg font-semibold text-sm transition">
+                    <i class="fa-solid fa-pen-to-square"></i>
+                    <span>নতুন ইমেইল (Compose)</span>
+                </button>
+            </div>
+
+            <!-- Gmail Folders list -->
+            <nav class="flex-1 px-3 space-y-1 overflow-y-auto">
+                <div class="text-[11px] font-bold text-slate-500 uppercase px-3 py-1">ফোল্ডার সমূহ</div>
+                <button data-folder="INBOX" class="folder-btn active-folder w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium bg-slate-800 text-gmail-blue">
+                    <div class="flex items-center space-x-3">
+                        <i class="fa-solid fa-inbox text-gmail-blue w-5"></i>
+                        <span>ইনবক্স (Inbox)</span>
+                    </div>
+                    <span id="count-unread" class="text-xs bg-gmail-blue/20 text-gmail-blue px-2 py-0.5 rounded-full font-bold">0</span>
+                </button>
+                <button data-folder="STARRED" class="folder-btn w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:bg-slate-800">
+                    <div class="flex items-center space-x-3">
+                        <i class="fa-solid fa-star text-gmail-yellow w-5"></i>
+                        <span>স্টারড (Starred)</span>
+                    </div>
+                </button>
+                <button data-folder="SENT" class="folder-btn w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:bg-slate-800">
+                    <div class="flex items-center space-x-3">
+                        <i class="fa-solid fa-paper-plane text-gmail-green w-5"></i>
+                        <span>সেন্ড (Sent)</span>
+                    </div>
+                </button>
+                <button data-folder="TRASH" class="folder-btn w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:bg-slate-800">
+                    <div class="flex items-center space-x-3">
+                        <i class="fa-solid fa-trash-can text-slate-400 w-5"></i>
+                        <span>ট্র্যাশ (Trash)</span>
+                    </div>
+                </button>
+            </nav>
+
+            <!-- Connected Accounts Summary -->
+            <div class="p-3 border-t border-slate-800 bg-slate-950/60">
+                <div class="text-[11px] font-bold text-slate-400 mb-2">সংযুক্ত জিমেইল অ্যাকাউন্টস</div>
+                <div id="sidebar-accounts-list" class="space-y-1.5 max-h-32 overflow-y-auto">
+                    <!-- Dynamic Account Items -->
+                </div>
+            </div>
+        </aside>
+
+        <!-- Sidebar Overlay for Mobile -->
+        <div id="sidebar-backdrop" class="fixed inset-0 bg-black/60 z-20 hidden md:hidden"></div>
+
+        <!-- VIEW CONTAINER 1: INBOX & READER -->
+        <main id="view-inbox" class="flex-1 flex overflow-hidden w-full relative">
+            <!-- EMAIL LIST -->
+            <section id="email-list-pane" class="w-full md:w-5/12 lg:w-4/12 border-r border-slate-800 flex flex-col h-full bg-slate-900/50">
+                <!-- Search & Status Header -->
+                <div class="p-3 border-b border-slate-800 space-y-2">
+                    <div class="relative">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-500 text-xs"></i>
+                        <input type="text" id="email-search-input" placeholder="ইমেইল খুঁজুন..." class="w-full pl-9 pr-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-gmail-blue">
+                    </div>
+                    <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
+                        <span id="active-folder-label" class="font-bold uppercase tracking-wider text-gmail-blue">INBOX</span>
+                        <span id="sync-timestamp">Not synced yet</span>
+                    </div>
+                </div>
+
+                <!-- Messages List -->
+                <div id="email-items-container" class="flex-1 overflow-y-auto divide-y divide-slate-800/60">
+                    <!-- Empty State -->
+                    <div id="inbox-empty-state" class="flex flex-col items-center justify-center h-full p-6 text-center text-slate-500">
+                        <i class="fa-solid fa-envelope-open-text text-4xl mb-3 text-slate-600"></i>
+                        <p class="text-xs font-medium">কোনো ইমেইল পাওয়া যায়নি অথবা লগইন করা নেই।</p>
+                        <button onclick="switchView('login')" class="mt-3 px-4 py-1.5 bg-gmail-blue text-white rounded-lg text-xs font-semibold">লগইন পেজে যান</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- EMAIL DETAIL READER -->
+            <section id="email-reader-pane" class="hidden md:flex flex-1 flex-col h-full bg-slate-900 absolute md:relative inset-0 z-20">
+                <div id="reader-empty" class="flex flex-col items-center justify-center h-full text-slate-500 p-6">
+                    <i class="fa-solid fa-inbox text-5xl mb-3 text-slate-700"></i>
+                    <p class="text-xs">পড়ার জন্য একটি ইমেইল সিলেক্ট করুন</p>
+                </div>
+
+                <div id="reader-content" class="hidden flex-col h-full">
+                    <!-- Reader Header -->
+                    <div class="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
+                        <button id="btn-reader-back" class="md:hidden p-2 text-slate-300 hover:bg-slate-800 rounded-lg">
+                            <i class="fa-solid fa-arrow-left"></i>
+                        </button>
+                        <div class="flex items-center space-x-2">
+                            <button id="btn-delete-mail" title="Delete Mail" class="p-2 text-slate-400 hover:text-gmail-red hover:bg-slate-800 rounded-lg">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
+                        <span id="reader-date" class="text-[11px] text-slate-400"></span>
+                    </div>
+
+                    <!-- Email Detailed Content -->
+                    <div class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+                        <h2 id="reader-subject" class="text-lg font-bold text-white leading-snug"></h2>
+                        <div class="flex items-center space-x-3 pb-3 border-b border-slate-800">
+                            <div id="reader-avatar" class="w-10 h-10 rounded-full bg-gmail-blue text-white font-bold flex items-center justify-center text-sm">
+                                G
+                            </div>
+                            <div class="overflow-hidden">
+                                <div id="reader-from-name" class="text-xs font-semibold text-white truncate"></div>
+                                <div id="reader-from-email" class="text-[11px] text-slate-400 truncate"></div>
+                            </div>
+                        </div>
+
+                        <!-- Email Body Output Frame -->
+                        <div id="reader-body" class="text-xs text-slate-200 leading-relaxed overflow-x-auto space-y-2">
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- VIEW CONTAINER 2: DUAL LOGIN & SETUP ENGINE -->
+        <main id="view-login" class="hidden flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-950">
+            <div class="max-w-3xl mx-auto space-y-6">
+                <!-- Banner -->
+                <div class="bg-gradient-to-r from-slate-900 to-slate-800 p-6 rounded-2xl border border-slate-800 shadow-xl flex items-center justify-between">
+                    <div>
+                        <h2 class="text-xl font-bold text-white mb-1">জিমেইল লগইন ও সংযোগ ম্যানেজমেন্ট</h2>
+                        <p class="text-xs text-slate-400">গুগল সিকিউর OAuth2 এবং ম্যানুয়াল API কি সেটআপের মাধ্যমে আপনার জিমেইল কানেক্ট রাখুন।</p>
+                    </div>
+                    <i class="fa-brands fa-google text-4xl text-gmail-red opacity-80"></i>
+                </div>
+
+                <!-- SYSTEM 1: AUTOMATIC OAUTH2 LOGIN -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div class="flex items-center space-x-2">
+                            <span class="w-6 h-6 rounded-full bg-gmail-blue text-white text-xs flex items-center justify-center font-bold">1</span>
+                            <h3 class="font-bold text-sm text-white">অটোমেটিক গুগল অ авториাইজেশন (Official OAuth2 SDK)</h3>
+                        </div>
+                        <span class="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-semibold">প্রস্তাবিত</span>
+                    </div>
+
+                    <p class="text-xs text-slate-400">
+                        গুগল অফিসিয়াল Identity Services (GIS) পপআপের মাধ্যমে সরাসরি এক ক্লিকে জিমেইল ইনবক্স পারমিশন প্রদান করুন।
+                    </p>
+
+                    <!-- Client ID Input for System 1 -->
+                    <div class="space-y-1">
+                        <label class="text-xs font-semibold text-slate-300">Google OAuth Client ID:</label>
+                        <input type="text" id="cfg-client-id" placeholder="123456789-xyz.apps.googleusercontent.com" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-gmail-blue">
+                        <p class="text-[10px] text-slate-500">Google Cloud Console থেকে সংগৃহীত Web Client ID দিন।</p>
+                    </div>
+
+                    <button id="btn-google-oauth-login" class="w-full sm:w-auto px-6 py-2.5 bg-gmail-blue hover:bg-blue-600 text-white font-semibold rounded-xl text-xs flex items-center justify-center space-x-2 shadow-lg transition">
+                        <i class="fa-brands fa-google text-sm"></i>
+                        <span>Google অ্যাকাউন্ট দিয়ে সাইন ইন করুন</span>
+                    </button>
+                </div>
+
+                <!-- SYSTEM 2: MANUAL GMAIL LOGIN & PERMANENT REFRESH TOKEN SYSTEM -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div class="flex items-center space-x-2">
+                            <span class="w-6 h-6 rounded-full bg-gmail-yellow text-slate-900 text-xs flex items-center justify-center font-bold">2</span>
+                            <h3 class="font-bold text-sm text-white">ম্যানুয়াল জিমেইল লগইন ও পার্মানেন্ট টোকেন সেটআপ</h3>
+                        </div>
+                        <span class="text-[10px] bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 px-2 py-0.5 rounded-full font-semibold">স্থায়ী কানেকশন</span>
+                    </div>
+
+                    <p class="text-xs text-slate-400">
+                        দীর্ঘমেয়াদী অটোমেটিক সিঙ্ক এবং বট মোডের জন্য আপনার Access Token অথবা Refresh Token ম্যানুয়ালি ইনপুট দিয়ে চিরস্থায়ী লগইন রাখুন।
+                    </p>
+
+                    <form id="form-manual-auth" class="space-y-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-[11px] font-semibold text-slate-300">ইমেইল এড্রেস (Account Email):</label>
+                                <input type="email" id="manual-email" required placeholder="user@gmail.com" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-gmail-blue">
+                            </div>
+                            <div>
+                                <label class="text-[11px] font-semibold text-slate-300">Direct Access Token (OAuth2):</label>
+                                <input type="text" id="manual-access-token" placeholder="ya29.a0AXo..." class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-gmail-blue">
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="text-[11px] font-semibold text-slate-300">Refresh Token (চিরস্থায়ী অটো সিঙ্কের জন্য):</label>
+                            <input type="text" id="manual-refresh-token" placeholder="1//04g..." class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-gmail-blue">
+                        </div>
+
+                        <button type="submit" class="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white font-semibold rounded-xl text-xs flex items-center space-x-2">
+                            <i class="fa-solid fa-floppy-disk text-gmail-green"></i>
+                            <span>ম্যানুয়ালি অ্যাকাউন্ট সেভ ও কানেক্ট করুন</span>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- CONNECTED ACCOUNTS MANAGEMENT CARD -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+                    <h3 class="font-bold text-sm text-white flex items-center space-x-2">
+                        <i class="fa-solid fa-users-gear text-gmail-blue"></i>
+                        <span>সংযুক্ত অ্যাকাউন্টের তালিকা ও সুইচার</span>
+                    </h3>
+                    <div id="connected-accounts-full-list" class="space-y-2">
+                        <!-- Account item cards rendered via JS -->
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- COMPOSE EMAIL MODAL                        -->
+    <!-- ========================================== -->
+    <div id="modal-compose" class="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 hidden backdrop-blur-sm">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-xl rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <div class="bg-slate-800/80 px-4 py-3 flex items-center justify-between border-b border-slate-700">
+                <h3 class="font-bold text-xs text-white">নতুন বার্তা লিখুন (New Message)</h3>
+                <button id="btn-close-compose" class="text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-xmark text-base"></i>
+                </button>
+            </div>
+            <form id="form-compose-mail" class="p-4 space-y-3">
+                <input type="email" id="compose-recipient" required placeholder="প্রাপক (To Email)" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-gmail-blue">
+                <input type="text" id="compose-subject" required placeholder="বিষয় (Subject)" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-gmail-blue">
+                <textarea id="compose-body" rows="6" required placeholder="আপনার মেসেজ বিস্তারিত লিখুন..." class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-gmail-blue resize-none"></textarea>
+
+                <div class="flex items-center justify-end space-x-2 pt-2">
+                    <button type="button" onclick="document.getElementById('modal-compose').classList.add('hidden')" class="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white">বাতিল</button>
+                    <button type="submit" id="btn-send-mail" class="px-5 py-2 bg-gmail-blue hover:bg-blue-600 text-white font-semibold rounded-xl text-xs flex items-center space-x-2">
+                        <span>সেন্ড করুন</span>
+                        <i class="fa-solid fa-paper-plane text-xs"></i>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATIONS -->
+    <div id="app-toast" class="fixed bottom-4 right-4 bg-slate-800 border border-slate-700 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-3 z-50 transform translate-y-24 opacity-0 transition-all duration-300">
+        <i id="toast-icon" class="fa-solid fa-circle-info text-gmail-blue"></i>
+        <span id="toast-msg" class="text-xs font-medium">Notification</span>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- JAVASCRIPT APP LOGIC                       -->
+    <!-- ========================================== -->
+    <script>
+        // Default Configuration
+        // Note: Replace this with your Google OAuth Web Client ID from Google Cloud Console
+        let googleClientId = localStorage.getItem('gmail_app_client_id') || "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com";
+        const GMAIL_SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.modify";
+
+        // Global State
+        let accounts = []; // Array of account objects
+        let activeAccountIndex = 0;
+        let activeFolder = 'INBOX';
+        let currentFetchedEmails = [];
+        let gisTokenClient = null;
+        let tgApp = null;
+
+        // Step 1: App Initialization on Window Load
+        window.onload = async function() {
+            document.getElementById('cfg-client-id').value = googleClientId;
+            initTelegramWebApp();
+            loadAccountsFromStorage();
+            initGoogleSDKs();
+            setupEventListeners();
+            
+            // Auto Refresh Inbox loop every 60 seconds
+            setInterval(() => {
+                if (accounts.length > 0) syncGmailInbox(false);
+            }, 60000);
+        };
+
+        /* -------------------------------------------------- */
+        /* 1. TELEGRAM MINI APP INTEGRATION                   */
+        /* -------------------------------------------------- */
+        function initTelegramWebApp() {
+            if (window.Telegram && window.Telegram.WebApp) {
+                tgApp = window.Telegram.WebApp;
+                tgApp.ready();
+                tgApp.expand();
+                tgApp.setHeaderColor('#0f172a');
+            }
+        }
+
+        /* -------------------------------------------------- */
+        /* 2. DYNAMIC GOOGLE API AUTO-MERGE LOAD ENGINE       */
+        /* -------------------------------------------------- */
+        function initGoogleSDKs() {
+            // Load GAPI and auto-merge Gmail discovery OpenAPI docs
+            if (window.gapi) {
+                gapi.load('client', async () => {
+                    try {
+                        // Dynamically merge latest Gmail REST discovery API
+                        await gapi.client.load('https://www.googleapis.com/discovery/v1/apis/gmail/v1/rest');
+                        console.log("Google API Dynamic Discovery Loaded & Merged.");
+                    } catch (e) {
+                        console.warn("GAPI Discovery Load Fallback to direct REST API:", e);
+                    }
+                });
+            }
+
+            // Load GIS OAuth Token Client
+            if (window.google && google.accounts && google.accounts.oauth2) {
+                gisTokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: googleClientId,
+                    scope: GMAIL_SCOPES,
+                    callback: async (response) => {
+                        if (response.error) {
+                            showToast("OAuth Authorization Error: " + response.error, "error");
+                            return;
+                        }
+                        await handleOAuthSuccess(response.access_token, response.expires_in);
+                    }
+                });
+            } else {
+                setTimeout(initGoogleSDKs, 600);
+            }
+        }
+
+        /* -------------------------------------------------- */
+        /* 3. DUAL LOGIN SYSTEM HANDLERS                      */
+        /* -------------------------------------------------- */
+
+        // System 1: Auto GIS Authorization Login
+        function triggerGoogleOAuthLogin() {
+            const inputId = document.getElementById('cfg-client-id').value.trim();
+            if (inputId) {
+                googleClientId = inputId;
+                localStorage.setItem('gmail_app_client_id', googleClientId);
+            }
+
+            if (!gisTokenClient) {
+                initGoogleSDKs();
+            }
+
+            if (gisTokenClient) {
+                gisTokenClient.requestAccessToken({ prompt: 'consent' });
+            } else {
+                showToast("Google Client SDK loaded check error. Fill valid Client ID.", "error");
+            }
+        }
+
+        async function handleOAuthSuccess(accessToken, expiresIn) {
+            showToast("অ্যাথরাইজেশন সফল! অ্যাকাউন্ট তথ্য সিঙ্ক হচ্ছে...", "info");
+            try {
+                // Fetch User Info
+                const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+                    headers: { Authorization: `Bearer ${accessToken}` }
+                });
+                const user = await res.json();
+
+                const newAcc = {
+                    email: user.email,
+                    name: user.name || user.email.split('@')[0],
+                    picture: user.picture || `https://placehold.co/100x100/ea4335/ffffff?text=${user.email[0].toUpperCase()}`,
+                    accessToken: accessToken,
+                    refreshToken: '',
+                    expiresAt: Date.now() + (expiresIn * 1000),
+                    loginType: 'OAUTH'
+                };
+
+                saveOrUpdateAccount(newAcc);
+                switchView('inbox');
+                syncGmailInbox();
+            } catch (e) {
+                showToast("User Profile Fetch Error: " + e.message, "error");
+            }
+        }
+
+        // System 2: Manual Login Handler
+        document.getElementById('form-manual-auth').onsubmit = function(e) {
+            e.preventDefault();
+            const email = document.getElementById('manual-email').value.trim();
+            const accessToken = document.getElementById('manual-access-token').value.trim();
+            const refreshToken = document.getElementById('manual-refresh-token').value.trim();
+
+            if (!accessToken && !refreshToken) {
+                showToast("Access Token অথবা Refresh Token যেকোনো একটি প্রদান করুন", "error");
+                return;
+            }
+
+            const manualAcc = {
+                email: email,
+                name: email.split('@')[0],
+                picture: `https://placehold.co/100x100/4285f4/ffffff?text=${email[0].toUpperCase()}`,
+                accessToken: accessToken,
+                refreshToken: refreshToken,
+                expiresAt: accessToken ? Date.now() + (3600 * 1000) : 0,
+                loginType: 'MANUAL'
+            };
+
+            saveOrUpdateAccount(manualAcc);
+            showToast("ম্যানুয়াল অ্যাকাউন্ট কানেক্ট করা হয়েছে!", "success");
+            switchView('inbox');
+            syncGmailInbox();
+        };
+
+        /* -------------------------------------------------- */
+        /* 4. PERMANENT SESSION & STORAGE MANAGEMENT          */
+        /* -------------------------------------------------- */
+        function saveOrUpdateAccount(accountObj) {
+            const idx = accounts.findIndex(a => a.email === accountObj.email);
+            if (idx >= 0) {
+                accounts[idx] = { ...accounts[idx], ...accountObj };
+                activeAccountIndex = idx;
+            } else {
+                accounts.push(accountObj);
+                activeAccountIndex = accounts.length - 1;
+            }
+            persistAccounts();
+            renderAccountsUI();
+        }
+
+        function persistAccounts() {
+            const dataStr = JSON.stringify(accounts);
+            localStorage.setItem('gmail_app_accounts', dataStr);
+            
+            // Safely check if Telegram CloudStorage is supported in this SDK version (6.9+)
+            if (tgApp && tgApp.isVersionAtLeast && tgApp.isVersionAtLeast('6.9') && tgApp.CloudStorage) {
+                try {
+                    tgApp.CloudStorage.setItem('gmail_app_accounts', dataStr);
+                } catch(e) {
+                    console.warn("Telegram CloudStorage not supported or available:", e);
+                }
+            }
+        }
+
+        function loadAccountsFromStorage() {
+            const localData = localStorage.getItem('gmail_app_accounts');
+            if (localData) {
+                try {
+                    accounts = JSON.parse(localData);
+                    renderAccountsUI();
+                } catch(e) {}
+            }
+            
+            // Safely check if Telegram CloudStorage is supported in this SDK version (6.9+)
+            if (tgApp && tgApp.isVersionAtLeast && tgApp.isVersionAtLeast('6.9') && tgApp.CloudStorage) {
+                try {
+                    tgApp.CloudStorage.getItem('gmail_app_accounts', (err, val) => {
+                        if (!err && val) {
+                            try {
+                                accounts = JSON.parse(val);
+                                renderAccountsUI();
+                            } catch(e) {}
+                        }
+                    });
+                } catch(e) {
+                    console.warn("Telegram CloudStorage fetch failed:", e);
+                }
+            }
+        }
+
+        /* -------------------------------------------------- */
+        /* 5. GMAIL REST API ASYNC SYNC ENGINE                */
+        /* -------------------------------------------------- */
+        async function syncGmailInbox(showLoading = true) {
+            if (accounts.length === 0) {
+                renderInboxEmpty("কোনো লগইন অ্যাকাউন্ট পাওয়া যায়নি।");
+                return;
+            }
+
+            const currentAcc = accounts[activeAccountIndex];
+            if (!currentAcc || !currentAcc.accessToken) {
+                renderInboxEmpty("অ্যাক্সেস টোকেন মেয়াদোত্তীর্ণ। আবার লগইন করুন।");
+                return;
+            }
+
+            if (showLoading) {
+                document.getElementById('sync-icon').classList.add('fa-spin');
+            }
+
+            document.getElementById('sync-timestamp').innerText = "সিঙ্ক হচ্ছে...";
+
+            try {
+                // Fetch Message list via REST API
+                const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=label:${activeFolder}&maxResults=15`;
+                const res = await fetch(url, {
+                    headers: { Authorization: `Bearer ${currentAcc.accessToken}` }
+                });
+
+                if (res.status === 401) {
+                    showToast("Session token expired! Please re-authorize.", "error");
+                    renderInboxEmpty("টোকেন মেয়াদ শেষ। পুনরায় লগইন করুন।");
+                    return;
+                }
+
+                const listData = await res.json();
+                if (!listData.messages || listData.messages.length === 0) {
+                    currentFetchedEmails = [];
+                    renderEmailCards();
+                    return;
+                }
+
+                // Async fetch detail of each email concurrently
+                const emailFetchPromises = listData.messages.map(m => fetchSingleEmailDetail(m.id, currentAcc.accessToken));
+                currentFetchedEmails = await Promise.all(emailFetchPromises);
+
+                renderEmailCards();
+                document.getElementById('sync-timestamp').innerText = "সর্বশেষ: " + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            } catch (err) {
+                showToast("Sync Failed: " + err.message, "error");
+            } finally {
+                document.getElementById('sync-icon').classList.remove('fa-spin');
+            }
+        }
+
+        async function fetchSingleEmailDetail(id, token) {
+            const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`;
+            const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+            const msg = await res.json();
+            return parseRawGmailPayload(msg);
+        }
+
+        function parseRawGmailPayload(msg) {
+            const headers = msg.payload?.headers || [];
+            const getHeader = (name) => headers.find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+
+            const subject = getHeader('subject') || '(No Subject)';
+            const from = getHeader('from') || 'Unknown Sender';
+            const date = getHeader('date') || '';
+            const snippet = msg.snippet || '';
+
+            let body = '';
+            if (msg.payload?.body?.data) {
+                body = decodeBase64(msg.payload.body.data);
+            } else if (msg.payload?.parts) {
+                const htmlPart = msg.payload.parts.find(p => p.mimeType === 'text/html');
+                const textPart = msg.payload.parts.find(p => p.mimeType === 'text/plain');
+                if (htmlPart?.body?.data) body = decodeBase64(htmlPart.body.data);
+                else if (textPart?.body?.data) body = decodeBase64(textPart.body.data);
+            }
+
+            return {
+                id: msg.id,
+                subject,
+                from,
+                date: date ? new Date(date).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : '',
+                snippet,
+                body: body || snippet,
+                isUnread: msg.labelIds ? msg.labelIds.includes('UNREAD') : false
+            };
+        }
+
+        function decodeBase64(encoded) {
+            try {
+                let base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+                return decodeURIComponent(escape(window.atob(base64)));
+            } catch (e) {
+                return "সহজে কনটেন্ট রেন্ডার করা সম্ভব হয়নি।";
+            }
+        }
+
+        /* -------------------------------------------------- */
+        /* 6. UI RENDERERS AND VIEW SWITCHING                 */
+        /* -------------------------------------------------- */
+        function renderAccountsUI() {
+            const sidebarList = document.getElementById('sidebar-accounts-list');
+            const fullList = document.getElementById('connected-accounts-full-list');
+            sidebarList.innerHTML = '';
+            fullList.innerHTML = '';
+
+            document.getElementById('account-badge-count').innerText = accounts.length;
+
+            if (accounts.length === 0) return;
+
+            const activeAcc = accounts[activeAccountIndex];
+            if (activeAcc) {
+                document.getElementById('active-user-img').src = activeAcc.picture;
+            }
+
+            accounts.forEach((acc, idx) => {
+                const isActive = idx === activeAccountIndex;
+
+                // Sidebar mini list item
+                const sItem = document.createElement('div');
+                sItem.className = `flex items-center justify-between p-1.5 rounded-lg text-xs cursor-pointer ${isActive ? 'bg-slate-800 text-gmail-blue border border-gmail-blue/40' : 'text-slate-400 hover:bg-slate-800/50'}`;
+                sItem.onclick = () => switchActiveAccount(idx);
+                sItem.innerHTML = `
+                    <div class="flex items-center space-x-2 truncate">
+                        <img src="${acc.picture}" class="w-5 h-5 rounded-full object-cover">
+                        <span class="truncate font-medium">${acc.email}</span>
+                    </div>
+                    ${isActive ? '<i class="fa-solid fa-check text-[10px] text-gmail-blue"></i>' : ''}
+                `;
+                sidebarList.appendChild(sItem);
+
+                // Settings View full list card
+                const fCard = document.createElement('div');
+                fCard.className = `flex items-center justify-between p-3 rounded-xl border ${isActive ? 'border-gmail-blue bg-blue-500/10' : 'border-slate-800 bg-slate-950'} text-xs`;
+                fCard.innerHTML = `
+                    <div class="flex items-center space-x-3 truncate">
+                        <img src="${acc.picture}" class="w-8 h-8 rounded-full object-cover">
+                        <div>
+                            <p class="font-bold text-white">${acc.name}</p>
+                            <p class="text-slate-400 text-[11px]">${acc.email} (${acc.loginType})</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        ${!isActive ? `<button onclick="switchActiveAccount(${idx})" class="px-3 py-1 bg-slate-800 text-white rounded-lg hover:bg-slate-700">সুইচ করুন</button>` : '<span class="text-xs text-gmail-blue font-bold px-2">এ্যাক্টিভ</span>'}
+                        <button onclick="removeAccount(${idx})" class="p-1.5 text-slate-500 hover:text-gmail-red"><i class="fa-solid fa-trash-can"></i></button>
+                    </div>
+                `;
+                fullList.appendChild(fCard);
+            });
+        }
+
+        function switchActiveAccount(idx) {
+            activeAccountIndex = idx;
+            renderAccountsUI();
+            syncGmailInbox();
+            showToast("Account switched!", "info");
+        }
+
+        function removeAccount(idx) {
+            accounts.splice(idx, 1);
+            if (activeAccountIndex >= accounts.length) activeAccountIndex = Math.max(0, accounts.length - 1);
+            persistAccounts();
+            renderAccountsUI();
+            syncGmailInbox();
+            showToast("Account removed", "info");
+        }
+
+        function renderEmailCards() {
+            const container = document.getElementById('email-items-container');
+            container.innerHTML = '';
+
+            if (currentFetchedEmails.length === 0) {
+                renderInboxEmpty("ফোল্ডারটি ফাঁকা রয়েছে।");
+                return;
+            }
+
+            let unreadCount = 0;
+
+            currentFetchedEmails.forEach(email => {
+                if (email.isUnread) unreadCount++;
+                const card = document.createElement('div');
+                card.className = `p-3.5 cursor-pointer hover:bg-slate-800/60 transition flex items-start space-x-3 ${email.isUnread ? 'bg-blue-900/10 border-l-2 border-gmail-blue' : ''}`;
+                
+                card.innerHTML = `
+                    <div class="w-8 h-8 rounded-full bg-slate-800 text-gmail-blue font-bold flex items-center justify-center shrink-0 text-xs border border-slate-700">
+                        ${email.from.charAt(0).toUpperCase()}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center justify-between mb-0.5">
+                            <p class="text-xs ${email.isUnread ? 'font-bold text-white' : 'font-medium text-slate-300'} truncate">${escapeHtml(email.from)}</p>
+                            <span class="text-[10px] text-slate-500 shrink-0">${email.date}</span>
+                        </div>
+                        <h4 class="text-xs font-semibold text-slate-200 truncate mb-1">${escapeHtml(email.subject)}</h4>
+                        <p class="text-[11px] text-slate-400 truncate leading-snug">${escapeHtml(email.snippet)}</p>
+                    </div>
+                `;
+
+                card.onclick = () => openEmailDetail(email);
+                container.appendChild(card);
+            });
+
+            document.getElementById('count-unread').innerText = unreadCount;
+        }
+
+        function openEmailDetail(email) {
+            document.getElementById('reader-empty').classList.add('hidden');
+            document.getElementById('reader-content').classList.remove('hidden');
+            document.getElementById('reader-content').classList.add('flex');
+
+            document.getElementById('reader-subject').innerText = email.subject;
+            document.getElementById('reader-from-name').innerText = email.from;
+            document.getElementById('reader-from-email').innerText = email.from;
+            document.getElementById('reader-date').innerText = email.date;
+            document.getElementById('reader-body').innerHTML = email.body;
+
+            const readerPane = document.getElementById('email-reader-pane');
+            readerPane.classList.remove('hidden');
+            readerPane.classList.add('flex');
+        }
+
+        function renderInboxEmpty(msg) {
+            const container = document.getElementById('email-items-container');
+            container.innerHTML = `
+                <div class="flex flex-col items-center justify-center h-full p-6 text-center text-slate-500">
+                    <i class="fa-solid fa-inbox text-4xl mb-3 text-slate-700"></i>
+                    <p class="text-xs font-medium">${msg}</p>
+                </div>
+            `;
+        }
+
+        function switchView(viewName) {
+            const inboxView = document.getElementById('view-inbox');
+            const loginView = document.getElementById('view-login');
+            const inboxBtn = document.getElementById('tab-inbox-btn');
+            const loginBtn = document.getElementById('tab-login-btn');
+
+            if (viewName === 'inbox') {
+                inboxView.classList.remove('hidden');
+                loginView.classList.add('hidden');
+                inboxBtn.className = "px-3 py-1.5 rounded-lg font-medium transition-all bg-gmail-blue text-white shadow";
+                loginBtn.className = "px-3 py-1.5 rounded-lg font-medium transition-all text-slate-400 hover:text-white";
+            } else {
+                inboxView.classList.add('hidden');
+                loginView.classList.remove('hidden');
+                loginBtn.className = "px-3 py-1.5 rounded-lg font-medium transition-all bg-gmail-blue text-white shadow";
+                inboxBtn.className = "px-3 py-1.5 rounded-lg font-medium transition-all text-slate-400 hover:text-white";
+            }
+        }
+
+        /* -------------------------------------------------- */
+        /* 7. EVENT LISTENERS AND HELPERS                     */
+        /* -------------------------------------------------- */
+        function setupEventListeners() {
+            // View tabs
+            document.getElementById('tab-inbox-btn').onclick = () => switchView('inbox');
+            document.getElementById('tab-login-btn').onclick = () => switchView('login');
+
+            // OAuth Trigger
+            document.getElementById('btn-google-oauth-login').onclick = triggerGoogleOAuthLogin;
+
+            // Sync Refresh Button
+            document.getElementById('btn-sync-now').onclick = () => syncGmailInbox(true);
+
+            // Sidebar Toggle
+            document.getElementById('btn-toggle-sidebar').onclick = toggleSidebar;
+            document.getElementById('sidebar-backdrop').onclick = toggleSidebar;
+
+            // Folder click switching
+            document.querySelectorAll('.folder-btn').forEach(btn => {
+                btn.onclick = (e) => {
+                    document.querySelectorAll('.folder-btn').forEach(b => {
+                        b.classList.remove('active-folder', 'bg-slate-800', 'text-gmail-blue');
+                        b.classList.add('text-slate-300');
+                    });
+                    const target = e.currentTarget;
+                    target.classList.add('active-folder', 'bg-slate-800', 'text-gmail-blue');
+                    
+                    activeFolder = target.getAttribute('data-folder');
+                    document.getElementById('active-folder-label').innerText = activeFolder;
+                    syncGmailInbox();
+
+                    if (window.innerWidth < 768) toggleSidebar();
+                };
+            });
+
+            // Compose email modal
+            document.getElementById('btn-compose-modal').onclick = () => {
+                document.getElementById('modal-compose').classList.remove('hidden');
+            };
+            document.getElementById('btn-close-compose').onclick = () => {
+                document.getElementById('modal-compose').classList.add('hidden');
+            };
+
+            // Send Email Submit
+            document.getElementById('form-compose-mail').onsubmit = async (e) => {
+                e.preventDefault();
+                if (accounts.length === 0) return showToast("লগইন করুন প্রথমে", "error");
+
+                const activeAcc = accounts[activeAccountIndex];
+                const to = document.getElementById('compose-recipient').value;
+                const subject = document.getElementById('compose-subject').value;
+                const body = document.getElementById('compose-body').value;
+
+                const sendBtn = document.getElementById('btn-send-mail');
+                sendBtn.disabled = true;
+                sendBtn.innerText = "পাঠানো হচ্ছে...";
+
+                const rawEmail = [
+                    `To: ${to}`,
+                    `Subject: ${subject}`,
+                    'Content-Type: text/html; charset=utf-8',
+                    'MIME-Version: 1.0',
+                    '',
+                    body
+                ].join('\r\n');
+
+                const encoded = btoa(unescape(encodeURIComponent(rawEmail)))
+                    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+                try {
+                    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${activeAcc.accessToken}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ raw: encoded })
+                    });
+
+                    if (res.ok) {
+                        showToast("ইমেইল সফলভাবে পাঠানো হয়েছে!", "success");
+                        document.getElementById('modal-compose').classList.add('hidden');
+                        document.getElementById('form-compose-mail').reset();
+                    } else {
+                        showToast("ইমেইল পাঠাতে ব্যর্থ। টোকেন চেক করুন।", "error");
+                    }
+                } catch(err) {
+                    showToast("Error: " + err.message, "error");
+                } finally {
+                    sendBtn.disabled = false;
+                    sendBtn.innerHTML = `<span>সেন্ড করুন</span><i class="fa-solid fa-paper-plane text-xs"></i>`;
+                }
+            };
+
+            // Mobile Back in Reader
+            document.getElementById('btn-reader-back').onclick = () => {
+                document.getElementById('email-reader-pane').classList.add('hidden');
+            };
+
+            // Search Filter
+            document.getElementById('email-search-input').oninput = (e) => {
+                const query = e.target.value.toLowerCase();
+                const filtered = currentFetchedEmails.filter(mail => 
+                    mail.subject.toLowerCase().includes(query) || 
+                    mail.from.toLowerCase().includes(query) ||
+                    mail.snippet.toLowerCase().includes(query)
+                );
+                // Simple search UI refresh
+                const items = document.querySelectorAll('#email-items-container > div');
+                items.forEach((item, index) => {
+                    if (currentFetchedEmails[index]) {
+                        const m = currentFetchedEmails[index];
+                        const match = m.subject.toLowerCase().includes(query) || m.from.toLowerCase().includes(query);
+                        item.style.display = match ? 'flex' : 'none';
+                    }
+                });
+            };
+        }
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('app-sidebar');
+            const backdrop = document.getElementById('sidebar-backdrop');
+            const isHidden = sidebar.classList.contains('-translate-x-full');
+
+            if (isHidden) {
+                sidebar.classList.remove('-translate-x-full');
+                backdrop.classList.remove('hidden');
+            } else {
+                sidebar.classList.add('-translate-x-full');
+                backdrop.classList.add('hidden');
+            }
+        }
+
+        function showToast(msg, type = "info") {
+            const toast = document.getElementById('app-toast');
+            const toastMsg = document.getElementById('toast-msg');
+            const toastIcon = document.getElementById('toast-icon');
+
+            toastMsg.innerText = msg;
+            if (type === "error") {
+                toastIcon.className = "fa-solid fa-circle-exclamation text-gmail-red";
+            } else if (type === "success") {
+                toastIcon.className = "fa-solid fa-circle-check text-gmail-green";
+            } else {
+                toastIcon.className = "fa-solid fa-circle-info text-gmail-blue";
+            }
+
+            toast.classList.remove('translate-y-24', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-24', 'opacity-0');
+            }, 3000);
+        }
+
+        function escapeHtml(str) {
+            return str ? str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") : '';
+        }
+    </script>
+</body>
+</html>
